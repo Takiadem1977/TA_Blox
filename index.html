@@ -39,12 +39,14 @@
   textarea:focus { outline:1px solid var(--accent); }
   button { background:var(--accent); color:#111; border:0; border-radius:10px; padding:0 22px; font-weight:700; cursor:pointer; font-size:15px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
+  select { background:#111; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; font-size:13px; direction:ltr; }
   .link { background:none; color:var(--muted); font-weight:400; text-decoration:underline; padding:0; font-size:13px; }
 </style>
 </head>
 <body>
 <header>
   <h1>🍋 Roblox <span>AI Agent</span></h1>
+  <select id="provider" title="نموذج الذكاء الاصطناعي"></select>
   <div class="conn"><span class="dot" id="dot"></span><span id="statusText">Studio غير متصل</span></div>
   <div class="code" id="code" title="اضغط للنسخ">........</div>
   <button class="link" id="toggleHelp">كيف أربط Studio؟</button>
@@ -134,7 +136,22 @@ function handle(ev) {
   }
 }
 
+async function loadProviders() {
+  const sel = $("provider");
+  const d = await (await fetch("/api/providers")).json();
+  if (!d.providers.length) {
+    sel.innerHTML = "<option>لا يوجد مزوّد</option>";
+    add("msg err", "السيرفر ما فيه أي مفتاح API. أضف ANTHROPIC_API_KEY أو GEMINI_API_KEY أو GROQ_API_KEY أو DEEPSEEK_API_KEY في Environment.");
+    return;
+  }
+  sel.innerHTML = d.providers.map((p) => `<option value="${p.id}">${p.label} · ${p.model}</option>`).join("");
+  const saved = localStorage.getItem("rbx_agent_provider");
+  sel.value = d.providers.some((p) => p.id === saved) ? saved : d.default;
+  sel.onchange = () => localStorage.setItem("rbx_agent_provider", sel.value);
+}
+
 async function init() {
+  await loadProviders();
   const r = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
   code = (await r.json()).code;
   localStorage.setItem("rbx_agent_code", code);
@@ -154,7 +171,7 @@ $("form").onsubmit = async (e) => {
   input.value = "";
   add("msg user", esc(text));
   setBusy(true);
-  const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, message: text }) });
+  const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, message: text, provider: $("provider").value }) });
   if (!r.ok) { add("msg err", "فشل الإرسال: " + (await r.text())); setBusy(false); }
 };
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); } });
