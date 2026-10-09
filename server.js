@@ -7,11 +7,50 @@ const path = require("path");
 const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.MODEL || "claude-sonnet-5-5";
 const MAX_STEPS = 20; // أقصى عدد خطوات لكل رسالة
+const TOOL_RESULT_LIMIT = 15000; // أقصى طول لنتيجة أداة تُرسل للنموذج
 
-if (!API_KEY) console.warn("⚠️  ANTHROPIC_API_KEY غير مضبوط");
+/* ------------------------------ المزوّدون ------------------------------ */
+// يظهر في الواجهة فقط المزوّد الذي ضبطت له مفتاح API في متغيرات البيئة.
+// يمكنك تغيير اسم أي نموذج من متغيرات البيئة (راجع لوحة كل مزوّد للأسماء الحالية).
+const PROVIDERS = {
+  claude: {
+    label: "Claude",
+    kind: "anthropic",
+    key: process.env.ANTHROPIC_API_KEY,
+    model: process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-5-5",
+  },
+  gemini: {
+    label: "Gemini",
+    kind: "openai",
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    key: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  },
+  groq: {
+    label: "Groq",
+    kind: "openai",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    key: process.env.GROQ_API_KEY,
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+  },
+  deepseek: {
+    label: "DeepSeek",
+    kind: "openai",
+    url: "https://api.deepseek.com/chat/completions",
+    key: process.env.DEEPSEEK_API_KEY,
+    model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+  },
+};
+
+const availableProviders = () =>
+  Object.entries(PROVIDERS)
+    .filter(([, p]) => p.key)
+    .map(([id, p]) => ({ id, label: p.label, model: p.model }));
+
+if (!availableProviders().length)
+  console.warn("⚠️  لا يوجد أي مفتاح API: ضبط واحداً على الأقل من ANTHROPIC_API_KEY / GEMINI_API_KEY / GROQ_API_KEY / DEEPSEEK_API_KEY");
+else console.log("Providers:", availableProviders().map((p) => `${p.id} (${p.model})`).join(", "));
 
 /* ----------------------------- الجلسات ----------------------------- */
 // كل جلسة = كود اتصال يربط صفحة الويب ببلجن واحد في Studio
@@ -155,23 +194,147 @@ Work like a careful engineer:
 - Paths are dot-separated starting from a service name. Instance names containing dots are not supported.
 - Reply in the same language the developer writes in. Keep replies short: say what you did and what to test.`;
 
-async function callClaude(messages) {
+/* ---------------------- محوّلات المزوّدين ----------------------
+   نخزّن المحادثة دائماً بصيغة Anthropic (blocks: text / tool_use / tool_result)
+   ونحوّلها لصيغة OpenAI عند الحاجة، فيمكن تبديل المزوّد في منتصف المحادثة. */
+
+// --- Claude (Anthropic) ---
+async function callAnthropic(p, messages) {
+  const clean = messages.map((m) =>
+    typeof m.content === "string"
+      ? m
+      : { role: m.role, content: m.content.map(({ extra, ...b }) => b) } // نحذف الحقول الخاصة بمزوّدين آخرين
+  );
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM, tools: TOOLS, messages }),
+    headers: { "content-type": "application/json", "x-api-key": p.key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: p.model, max_tokens: 8000, system: SYSTEM, tools: TOOLS, messages: clean }),
   });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
+// --- Gemini / Groq / DeepSeek (واجهة متوافقة مع OpenAI) ---
+function toOpenAIMessages(messages) {
+  const out = [{ role: "system", content: SYSTEM }];
+  for (const m of messages) {
+    if (typeof m.content === "string") {
+      out.push({ role: m.role, content: m.content });
+    } else if (m.role === "assistant") {
+      const text = m.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+      const calls = m.content
+        .filter((b) => b.type === "tool_use")
+        .map((b) => ({
+          id: b.id,
+          type: "function",
+          function: { name: b.name, arguments: JSON.stringify(b.input || {}) },
+          ...(b.extra ? { extra_content: b.extra } : {}), // Gemini 3: thought signatures
+        }));
+      const msg = { role: "assistant", content: text };
+      if (calls.length) msg.tool_calls = calls;
+      out.push(msg);
+    } else {
+      for (const b of m.content) {
+        if (b.type === "tool_result") out.push({ role: "tool", tool_call_id: b.tool_use_id, content: b.content });
+        else if (b.type === "text") out.push({ role: "user", content: b.text });
+      }
+    }
+  }
+  return out;
+}
+
+// Gemini لا يقبل كائنات (object) بدون properties، فنحوّلها لنص JSON ونفكّه عند الاستقبال
+function geminiSafe(schema) {
+  const s = JSON.parse(JSON.stringify(schema));
+  const walk = (node) => {
+    if (!node || typeof node !== "object" || !node.properties) return;
+    for (const [k, v] of Object.entries(node.properties)) {
+      if (v.type === "object" && !v.properties) {
+        node.properties[k] = { type: "string", description: (v.description || "") + " (JSON-encoded object, as a string)" };
+      } else walk(v);
+    }
+  };
+  walk(s);
+  return s;
+}
+
+function toOpenAITool(t, isGemini) {
+  const hasProps = t.input_schema.properties && Object.keys(t.input_schema.properties).length;
+  const fn = { name: t.name, description: t.description };
+  if (hasProps) fn.parameters = isGemini ? geminiSafe(t.input_schema) : t.input_schema;
+  else if (!isGemini) fn.parameters = { type: "object", properties: {} };
+  return { type: "function", function: fn };
+}
+
+// بعض النماذج ترسل الكائنات كنص JSON؛ نفكّها حسب مخطط الأداة
+function fixArgs(toolName, args) {
+  const tool = TOOLS.find((t) => t.name === toolName);
+  if (!tool || !args || typeof args !== "object") return args || {};
+  for (const [k, spec] of Object.entries(tool.input_schema.properties || {})) {
+    if (spec.type === "object" && typeof args[k] === "string") {
+      try {
+        args[k] = JSON.parse(args[k]);
+      } catch {}
+    }
+  }
+  return args;
+}
+
+async function callOpenAICompat(id, p, messages) {
+  const body = {
+    model: p.model,
+    messages: toOpenAIMessages(messages),
+    tools: TOOLS.map((t) => toOpenAITool(t, id === "gemini")),
+    tool_choice: "auto",
+    max_tokens: 8000,
+  };
+  const res = await fetch(p.url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${p.key}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${p.label} API ${res.status}: ${(await res.text()).slice(0, 800)}`);
+  const data = await res.json();
+  const msg = data.choices?.[0]?.message;
+  if (!msg) throw new Error(`${p.label}: empty response`);
+
+  // نحوّل الرد إلى صيغة Anthropic ليبقى باقي الكود موحّداً
+  const content = [];
+  if (msg.content && String(msg.content).trim()) content.push({ type: "text", text: String(msg.content) });
+  for (const tc of msg.tool_calls || []) {
+    let input = {};
+    try {
+      input = JSON.parse(tc.function?.arguments || "{}");
+    } catch {}
+    const block = {
+      type: "tool_use",
+      id: tc.id || "call_" + crypto.randomBytes(6).toString("hex"),
+      name: tc.function?.name,
+      input: fixArgs(tc.function?.name, input),
+    };
+    if (tc.extra_content) block.extra = tc.extra_content;
+    content.push(block);
+  }
+  return { content };
+}
+
+async function callModel(providerId, messages) {
+  const p = PROVIDERS[providerId];
+  if (!p || !p.key) throw new Error(`Provider "${providerId}" is not configured on the server`);
+  return p.kind === "anthropic" ? callAnthropic(p, messages) : callOpenAICompat(providerId, p, messages);
+}
+
 /* ------------------------------ حلقة الوكيل ------------------------------ */
-async function runAgent(s, userText) {
+async function runAgent(s, userText, providerId) {
   s.busy = true;
   s.messages.push({ role: "user", content: userText });
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const data = await callClaude(s.messages);
+      const data = await callModel(providerId, s.messages);
+      if (!data.content || !data.content.length) {
+        emit(s, { type: "error", text: `${PROVIDERS[providerId].label} رجّع رداً فارغاً، جرّب إعادة الطلب أو غيّر النموذج.` });
+        break;
+      }
       s.messages.push({ role: "assistant", content: data.content });
 
       for (const b of data.content) if (b.type === "text" && b.text.trim()) emit(s, { type: "text", text: b.text });
@@ -189,7 +352,7 @@ async function runAgent(s, userText) {
         results.push({
           type: "tool_result",
           tool_use_id: u.id,
-          content: JSON.stringify(r).slice(0, 30000),
+          content: JSON.stringify(r).slice(0, TOOL_RESULT_LIMIT),
           is_error: !r.ok,
         });
       }
@@ -272,13 +435,21 @@ http
       }
 
       // رسالة من المستخدم
+      if (req.method === "GET" && url.pathname === "/api/providers") {
+        const list = availableProviders();
+        return json(res, 200, { providers: list, default: list[0]?.id || null });
+      }
+
       if (req.method === "POST" && url.pathname === "/api/chat") {
-        const { code, message } = await readJson(req);
+        const { code, message, provider } = await readJson(req);
         const s = sessions.get(code);
         if (!s) return json(res, 404, { error: "unknown session" });
         if (s.busy) return json(res, 409, { error: "agent is busy" });
         if (!message || !String(message).trim()) return json(res, 400, { error: "empty" });
-        runAgent(s, String(message));
+        const list = availableProviders();
+        const chosen = list.find((p) => p.id === provider) ? provider : list[0]?.id;
+        if (!chosen) return json(res, 400, { error: "no AI provider configured on the server" });
+        runAgent(s, String(message), chosen);
         return json(res, 200, { ok: true });
       }
 
