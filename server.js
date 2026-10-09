@@ -235,8 +235,18 @@ http
     try {
       // صفحة الويب
       if (req.method === "GET" && url.pathname === "/") {
+        const candidates = [
+          path.join(__dirname, "public", "index.html"),
+          path.join(__dirname, "index.html"),
+        ];
+        const file = candidates.find((f) => fs.existsSync(f));
+        if (!file) {
+          res.statusCode = 500;
+          res.setHeader("content-type", "text/plain; charset=utf-8");
+          return res.end("index.html not found. Put it in public/index.html next to server.js.");
+        }
         res.setHeader("content-type", "text/html; charset=utf-8");
-        return res.end(fs.readFileSync(path.join(__dirname, "public", "index.html")));
+        return res.end(fs.readFileSync(file));
       }
 
       // إنشاء/استعادة جلسة
