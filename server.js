@@ -49,7 +49,17 @@ const PROVIDERS = {
     kind: "openai",
     url: "https://api.groq.com/openai/v1/chat/completions",
     key: process.env.GROQ_API_KEY,
-    model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+  },
+  openrouter: {
+    // GPT-6 Astra عبر OpenRouter. يمكنك تشغيل أي نموذج آخر من OpenRouter بتغيير OPENROUTER_MODEL
+    label: process.env.OPENROUTER_MODEL ? "OpenRouter" : "GPT-6 Astra",
+    kind: "openai",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    key: process.env.OPENROUTER_API_KEY,
+    model: process.env.OPENROUTER_MODEL || "openai/gpt-6-astra",
+    maxTokens: 16000, // نماذج التفكير تحسب التفكير ضمن هذا الحد
+    headers: { "HTTP-Referer": process.env.PUBLIC_URL || "https://roblox-ai-agent.local", "X-Title": "Roblox AI Agent" },
   },
   deepseek: {
     label: "DeepSeek",
@@ -66,7 +76,7 @@ const availableProviders = () =>
     .map(([id, p]) => ({ id, label: p.label, model: p.model }));
 
 if (!availableProviders().length)
-  console.warn("⚠️  لا يوجد أي مفتاح API: ضبط واحداً على الأقل من ANTHROPIC_API_KEY / GEMINI_API_KEY / GROQ_API_KEY / DEEPSEEK_API_KEY");
+  console.warn("⚠️  لا يوجد أي مفتاح API: ضبط واحداً على الأقل من ANTHROPIC_API_KEY / GEMINI_API_KEY / GROQ_API_KEY / DEEPSEEK_API_KEY / OPENROUTER_API_KEY");
 else console.log("Providers:", availableProviders().map((p) => `${p.id} (${p.model})`).join(", "));
 
 /* ----------------------------- الجلسات ----------------------------- */
@@ -624,11 +634,11 @@ async function callOpenAICompat(id, p, messages, system) {
     messages: toOpenAIMessages(messages, system),
     tools: TOOLS.map((t) => toOpenAITool(t, id === "gemini")),
     tool_choice: "auto",
-    max_tokens: 8000,
+    max_tokens: p.maxTokens || 8000,
   };
   const res = await fetch(p.url, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${p.key}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${p.key}`, ...(p.headers || {}) },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${p.label} API ${res.status}: ${(await res.text()).slice(0, 800)}`);
