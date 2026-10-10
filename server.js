@@ -79,6 +79,11 @@ function newSession(code, uid) {
   const s = {
     code,
     uid,
+    chatId: null, // المحادثة النشطة حالياً
+    title: "",
+    roadmap: null, // خريطة الإنجازات للمحادثة النشطة
+    devChats: new Map(), // وضع التطوير بدون Firestore
+    chatInitP: null,
     messages: [], // المحادثة بصيغة Anthropic (تُحوَّل للمزوّدين الآخرين عند الحاجة)
     clients: new Set(), // اتصالات SSE من المتصفح
     queue: [], // أوامر بانتظار البلجن
@@ -94,9 +99,17 @@ function newSession(code, uid) {
 const userCode = new Map(); // uid -> code
 const missingCodes = new Map(); // كاش سلبي لأكواد غير موجودة (يمنع قراءات متكررة من Firestore)
 
-// نحمّل آخر 20 دورة (كل دورة تبدأ برسالة مستخدم نصية فتبقى المحادثة صالحة)
-async function loadTurns(code) {
-  const snap = await db.collection("sessions").doc(code).collection("turns").orderBy("createdAt", "desc").limit(20).get();
+/* --------------------------- المحادثات (Chats) ---------------------------
+   الجلسة (Session) = اتصال البلجن بحساب المستخدم، كودها ثابت.
+   المحادثة (Chat) = سجل + خريطة إنجازات. للمستخدم عدة محادثات والنشطة واحدة.
+   Firestore: sessions/{code}/chats/{chatId}  و  .../chats/{chatId}/turns/{ts}   */
+const DEFAULT_TITLE = "محادثة جديدة";
+const newChatId = () => crypto.randomBytes(6).toString("hex");
+const validChatId = (id) => /^[a-f0-9]{12}$/.test(String(id));
+const chatsCol = (s) => db.collection("sessions").doc(s.code).collection("chats");
+
+async function loadTurns(s, chatId) {
+  const snap = await chatsCol(s).doc(chatId).collection("turns").orderBy("createdAt", "desc").limit(20).get();
   const msgs = [];
   snap.docs.reverse().forEach((d) => {
     try {
@@ -105,6 +118,93 @@ async function loadTurns(code) {
   });
   return msgs;
 }
+
+async function listChats(s) {
+  if (!db)
+    return [...s.devChats.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
+  const snap = await chatsCol(s).orderBy("updatedAt", "desc").limit(40).get();
+  return snap.docs.map((d) => ({ id: d.id, title: d.data().title || DEFAULT_TITLE, updatedAt: d.data().updatedAt || 0 }));
+}
+
+async function createChat(s) {
+  const id = newChatId();
+  const now = Date.now();
+  s.chatId = id;
+  s.title = DEFAULT_TITLE;
+  s.messages = [];
+  s.roadmap = null;
+  if (db) await chatsCol(s).doc(id).set({ title: s.title, createdAt: now, updatedAt: now, roadmap: null });
+  else s.devChats.set(id, { id, title: s.title, updatedAt: now, messages: s.messages, roadmap: null });
+  return id;
+}
+
+async function loadChat(s, id) {
+  if (!validChatId(id)) return false;
+  if (!db) {
+    const c = s.devChats.get(id);
+    if (!c) return false;
+    s.chatId = id;
+    s.title = c.title;
+    s.messages = c.messages;
+    s.roadmap = c.roadmap;
+    return true;
+  }
+  const doc = await chatsCol(s).doc(id).get();
+  if (!doc.exists) return false;
+  const d = doc.data();
+  s.messages = await loadTurns(s, id);
+  s.chatId = id;
+  s.title = d.title || DEFAULT_TITLE;
+  try {
+    s.roadmap = d.roadmap ? JSON.parse(d.roadmap) : null;
+  } catch {
+    s.roadmap = null;
+  }
+  return true;
+}
+
+// عنوان + وقت التحديث + الخريطة (كتابة واحدة)
+async function saveChatMeta(s) {
+  const now = Date.now();
+  if (!db) {
+    const c = s.devChats.get(s.chatId);
+    if (c) Object.assign(c, { title: s.title, updatedAt: now, messages: s.messages, roadmap: s.roadmap });
+    return;
+  }
+  try {
+    await chatsCol(s).doc(s.chatId).set({ title: s.title, updatedAt: now, roadmap: s.roadmap ? JSON.stringify(s.roadmap) : null }, { merge: true });
+  } catch (e) {
+    console.error("saveChatMeta failed:", e.message);
+  }
+}
+
+async function deleteChat(s, id) {
+  if (!db) return void s.devChats.delete(id);
+  const ref = chatsCol(s).doc(id);
+  const turns = await ref.collection("turns").limit(450).get();
+  const batch = db.batch();
+  turns.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(ref);
+  await batch.commit();
+}
+
+// نضمن وجود محادثة نشطة: آخر محادثة، أو ننشئ واحدة جديدة
+async function ensureActiveChat(s) {
+  if (s.chatId) return;
+  if (!s.chatInitP) {
+    s.chatInitP = (async () => {
+      const list = await listChats(s);
+      if (!(list.length && (await loadChat(s, list[0].id)))) await createChat(s);
+    })().finally(() => {
+      s.chatInitP = null;
+    });
+  }
+  await s.chatInitP;
+}
+
+const chatState = (s) => ({ chatId: s.chatId, title: s.title, messages: slimMessages(s.messages), roadmap: s.roadmap });
 
 // يرجّع الجلسة من الذاكرة أو يستعيدها من Firestore (مثلاً بعد إعادة تشغيل السيرفر)
 async function ensureSession(code) {
@@ -117,15 +217,12 @@ async function ensureSession(code) {
     missingCodes.set(code, Date.now() + 60000);
     return null;
   }
-  const messages = await loadTurns(code);
   if (sessions.has(code)) return sessions.get(code); // سبقنا طلب آخر
-  const s = newSession(code, doc.data().uid);
-  s.messages = messages;
-  return s;
+  return newSession(code, doc.data().uid);
 }
 
 // لكل مستخدم جلسة واحدة ثابتة (كودها ثابت، فيحفظه البلجن)
-async function getUserSession(user) {
+async function getUserSessionBase(user) {
   const uid = user.uid;
   let code = userCode.get(uid);
   if (!code && db) {
@@ -146,6 +243,12 @@ async function getUserSession(user) {
     await db.collection("sessions").doc(code).set({ uid, createdAt: Date.now() });
     await db.collection("users").doc(uid).set({ email: user.email || null, currentCode: code, updatedAt: Date.now() }, { merge: true });
   }
+  return s;
+}
+
+async function getUserSession(user) {
+  const s = await getUserSessionBase(user);
+  await ensureActiveChat(s);
   return s;
 }
 
@@ -194,28 +297,38 @@ setInterval(() => {
   for (const [k, v] of tickets) if (v.exp < n) tickets.delete(k);
 }, 60000).unref();
 
-// حفظ دورة المحادثة في Firestore (كتابة واحدة لكل رسالة مستخدم)
+// حفظ دورة المحادثة (كتابة للدورة + كتابة لبيانات المحادثة: العنوان والخريطة)
 async function persistTurn(s, startLen) {
-  if (!db) return;
-  const turn = s.messages.slice(startLen);
-  if (!turn.length) return;
-  let payload = JSON.stringify(turn);
-  if (Buffer.byteLength(payload) > 900000) {
-    // حد وثيقة Firestore = 1MiB: نقصّ نتائج الأدوات الطويلة
-    payload = JSON.stringify(
-      turn.map((m) =>
-        typeof m.content === "string"
-          ? m
-          : { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: String(b.content).slice(0, 1500) } : b)) }
-      )
-    );
+  // عنوان المحادثة = أول رسالة للمستخدم
+  if (s.title === DEFAULT_TITLE) {
+    const first = s.messages.find((m) => m.role === "user" && typeof m.content === "string");
+    if (first) s.title = first.content.replace(/^🎯\s*/, "").replace(/\s+/g, " ").trim().slice(0, 40) || DEFAULT_TITLE;
   }
-  if (Buffer.byteLength(payload) > 900000) return console.warn("persistTurn: turn too large, skipped");
-  try {
-    await db.collection("sessions").doc(s.code).collection("turns").doc(String(Date.now())).set({ createdAt: Date.now(), messages: payload });
-  } catch (e) {
-    console.error("persistTurn failed:", e.message);
+  if (db) {
+    const turn = s.messages.slice(startLen);
+    if (turn.length) {
+      let payload = JSON.stringify(turn);
+      if (Buffer.byteLength(payload) > 900000) {
+        // حد وثيقة Firestore = 1MiB: نقصّ نتائج الأدوات الطويلة
+        payload = JSON.stringify(
+          turn.map((m) =>
+            typeof m.content === "string"
+              ? m
+              : { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: String(b.content).slice(0, 1500) } : b)) }
+          )
+        );
+      }
+      if (Buffer.byteLength(payload) > 900000) console.warn("persistTurn: turn too large, skipped");
+      else {
+        try {
+          await chatsCol(s).doc(s.chatId).collection("turns").doc(String(Date.now())).set({ createdAt: Date.now(), messages: payload });
+        } catch (e) {
+          console.error("persistTurn failed:", e.message);
+        }
+      }
+    }
   }
+  await saveChatMeta(s);
 }
 
 // نسخة خفيفة من المحادثة لإعادة رسمها في المتصفح
@@ -345,6 +458,58 @@ const TOOLS = [
     description: "Delete an instance. Only when the developer asked for it.",
     input_schema: { type: "object", properties: { path: str("Dot path") }, required: ["path"] },
   },
+  {
+    name: "set_roadmap",
+    description:
+      "Create the developer's achievements roadmap (a visual map of milestones). Call it ONCE when the roadmap is 'none' and the developer describes the game/world they want. 6-12 concrete milestones in build order. This replaces any existing roadmap.",
+    input_schema: {
+      type: "object",
+      properties: {
+        goal: str("One sentence summarizing the game/world the developer wants"),
+        milestones: {
+          type: "array",
+          description: "Ordered milestones",
+          items: {
+            type: "object",
+            properties: {
+              id: str("Short unique id like m1, m2"),
+              title: str("Short title (max ~6 words)"),
+              description: str("What gets built in this milestone, concrete and small enough for one request"),
+            },
+            required: ["id", "title", "description"],
+          },
+        },
+      },
+      required: ["goal", "milestones"],
+    },
+  },
+  {
+    name: "add_milestones",
+    description: "Append more milestones to the existing roadmap (when the developer asks for more steps or ideas).",
+    input_schema: {
+      type: "object",
+      properties: {
+        milestones: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { id: str("Short unique id"), title: str("Short title"), description: str("What gets built") },
+            required: ["id", "title", "description"],
+          },
+        },
+      },
+      required: ["milestones"],
+    },
+  },
+  {
+    name: "update_milestone",
+    description: "Update a milestone's status: in_progress when you start it, done when you finished building and verified it.",
+    input_schema: {
+      type: "object",
+      properties: { id: str("Milestone id"), status: { type: "string", enum: ["todo", "in_progress", "done"] } },
+      required: ["id", "status"],
+    },
+  },
 ];
 
 const SYSTEM = `You are an expert Roblox game-development agent connected live to the developer's Roblox Studio session through tools.
@@ -354,14 +519,25 @@ Work like a careful engineer:
 - Scripts go in the right place: server logic in ServerScriptService, client logic in StarterPlayer.StarterPlayerScripts or StarterGui, shared modules in ReplicatedStorage.
 - Write clean, modern Luau (task.wait, no deprecated APIs, typed where helpful) and keep Parts Anchored unless physics is needed.
 - Paths are dot-separated starting from a service name. Instance names containing dots are not supported.
-- Reply in the same language the developer writes in. Keep replies short: say what you did and what to test.`;
+- Reply in the same language the developer writes in. Keep replies short: say what you did and what to test.
+
+Achievements roadmap (the developer sees it as a visual map next to the chat):
+- The current roadmap state is appended below. If it is "none" and the developer describes the game or world they want to make, call set_roadmap FIRST (6-12 milestones in build order, written in the developer's language, e.g. map base, spawn/lobby, core gameplay, UI, progression/data, polish). Do NOT start building from the initial description: after creating the roadmap, tell them in one or two sentences to pick a milestone on the map (or ask you to start).
+- If they ask for more steps or ideas, call add_milestones.
+- A message starting with 🎯 asks you to execute that milestone: call update_milestone(in_progress), build it fully with the Studio tools, verify it, then call update_milestone(done) and say what to test.
+- When you finish work that clearly matches a milestone on your own, mark it done too.`;
+
+const roadmapSummary = (s) =>
+  s.roadmap ? { goal: s.roadmap.goal, milestones: s.roadmap.milestones.map(({ id, title, status }) => ({ id, title, status })) } : null;
+
+const systemFor = (s) => SYSTEM + "\n\n[Current roadmap state]\n" + (s.roadmap ? JSON.stringify(roadmapSummary(s)) : "none");
 
 /* ---------------------- محوّلات المزوّدين ----------------------
    نخزّن المحادثة دائماً بصيغة Anthropic (blocks: text / tool_use / tool_result)
    ونحوّلها لصيغة OpenAI عند الحاجة، فيمكن تبديل المزوّد في منتصف المحادثة. */
 
 // --- Claude (Anthropic) ---
-async function callAnthropic(p, messages) {
+async function callAnthropic(p, messages, system) {
   const clean = messages.map((m) =>
     typeof m.content === "string"
       ? m
@@ -370,15 +546,15 @@ async function callAnthropic(p, messages) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": p.key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: p.model, max_tokens: 8000, system: SYSTEM, tools: TOOLS, messages: clean }),
+    body: JSON.stringify({ model: p.model, max_tokens: 8000, system, tools: TOOLS, messages: clean }),
   });
   if (!res.ok) throw new Error(`Claude API ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
 // --- Gemini / Groq / DeepSeek (واجهة متوافقة مع OpenAI) ---
-function toOpenAIMessages(messages) {
-  const out = [{ role: "system", content: SYSTEM }];
+function toOpenAIMessages(messages, system) {
+  const out = [{ role: "system", content: system }];
   for (const m of messages) {
     if (typeof m.content === "string") {
       out.push({ role: m.role, content: m.content });
@@ -433,7 +609,7 @@ function fixArgs(toolName, args) {
   const tool = TOOLS.find((t) => t.name === toolName);
   if (!tool || !args || typeof args !== "object") return args || {};
   for (const [k, spec] of Object.entries(tool.input_schema.properties || {})) {
-    if (spec.type === "object" && typeof args[k] === "string") {
+    if ((spec.type === "object" || spec.type === "array") && typeof args[k] === "string") {
       try {
         args[k] = JSON.parse(args[k]);
       } catch {}
@@ -442,10 +618,10 @@ function fixArgs(toolName, args) {
   return args;
 }
 
-async function callOpenAICompat(id, p, messages) {
+async function callOpenAICompat(id, p, messages, system) {
   const body = {
     model: p.model,
-    messages: toOpenAIMessages(messages),
+    messages: toOpenAIMessages(messages, system),
     tools: TOOLS.map((t) => toOpenAITool(t, id === "gemini")),
     tool_choice: "auto",
     max_tokens: 8000,
@@ -480,10 +656,49 @@ async function callOpenAICompat(id, p, messages) {
   return { content };
 }
 
-async function callModel(providerId, messages) {
+async function callModel(providerId, messages, system) {
   const p = PROVIDERS[providerId];
   if (!p || !p.key) throw new Error(`Provider "${providerId}" is not configured on the server`);
-  return p.kind === "anthropic" ? callAnthropic(p, messages) : callOpenAICompat(providerId, p, messages);
+  return p.kind === "anthropic" ? callAnthropic(p, messages, system) : callOpenAICompat(providerId, p, messages, system);
+}
+
+/* --------------------- أدوات الخريطة (تُنفَّذ على السيرفر) --------------------- */
+const SERVER_TOOLS = new Set(["set_roadmap", "add_milestones", "update_milestone"]);
+const STATUSES = ["todo", "in_progress", "done"];
+
+function cleanMilestones(list, existing = []) {
+  const used = new Set(existing.map((m) => m.id));
+  const out = [];
+  for (const m of Array.isArray(list) ? list : []) {
+    if (!m || !m.title) continue;
+    const fallback = "m" + (existing.length + out.length + 1);
+    let id = String(m.id || fallback).replace(/[^\w-]/g, "").slice(0, 30) || fallback;
+    while (used.has(id)) id += "x";
+    used.add(id);
+    out.push({ id, title: String(m.title).slice(0, 120), description: String(m.description || "").slice(0, 600), status: "todo" });
+  }
+  return out;
+}
+
+function runServerTool(s, name, a) {
+  a = a || {};
+  if (name === "set_roadmap") {
+    const ms = cleanMilestones(a.milestones).slice(0, 20);
+    if (!ms.length) return { ok: false, error: "milestones is empty" };
+    s.roadmap = { goal: String(a.goal || "").slice(0, 300), milestones: ms };
+  } else if (name === "add_milestones") {
+    if (!s.roadmap) return { ok: false, error: "no roadmap yet, call set_roadmap first" };
+    const add = cleanMilestones(a.milestones, s.roadmap.milestones).slice(0, 30 - s.roadmap.milestones.length);
+    if (!add.length) return { ok: false, error: "nothing to add (empty list or roadmap is full)" };
+    s.roadmap.milestones.push(...add);
+  } else if (name === "update_milestone") {
+    const m = s.roadmap && s.roadmap.milestones.find((x) => x.id === a.id);
+    if (!m) return { ok: false, error: "unknown milestone id: " + a.id };
+    if (!STATUSES.includes(a.status)) return { ok: false, error: "status must be todo | in_progress | done" };
+    m.status = a.status;
+  }
+  emit(s, { type: "roadmap", roadmap: s.roadmap });
+  return { ok: true, roadmap: roadmapSummary(s) };
 }
 
 /* ------------------------------ حلقة الوكيل ------------------------------ */
@@ -493,7 +708,7 @@ async function runAgent(s, userText, providerId) {
   s.messages.push({ role: "user", content: userText });
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const data = await callModel(providerId, s.messages);
+      const data = await callModel(providerId, s.messages, systemFor(s));
       if (!data.content || !data.content.length) {
         emit(s, { type: "error", text: `${PROVIDERS[providerId].label} رجّع رداً فارغاً، جرّب إعادة الطلب أو غيّر النموذج.` });
         break;
@@ -508,7 +723,9 @@ async function runAgent(s, userText, providerId) {
       const results = [];
       for (const u of uses) {
         emit(s, { type: "tool", name: u.name, input: u.input });
-        const r = studioConnected(s)
+        const r = SERVER_TOOLS.has(u.name)
+          ? runServerTool(s, u.name, u.input)
+          : studioConnected(s)
           ? await callStudio(s, u.name, u.input)
           : { ok: false, error: "Studio plugin is not connected. Ask the developer to connect the plugin." };
         emit(s, { type: "tool_result", name: u.name, ok: !!r.ok, error: r.error });
@@ -587,11 +804,66 @@ http
         return json(res, 200, { code: s.code, email: user.email, usage: await getUsage(user) });
       }
 
-      // سجل المحادثة المحفوظ
+      // حالة المحادثة النشطة: السجل + خريطة الإنجازات
       if (req.method === "GET" && url.pathname === "/api/history") {
         const user = await authenticate(req);
         const s = await getUserSession(user);
-        return json(res, 200, { messages: slimMessages(s.messages) });
+        return json(res, 200, chatState(s));
+      }
+
+      // قائمة المحادثات السابقة
+      if (req.method === "GET" && url.pathname === "/api/chats") {
+        const user = await authenticate(req);
+        const s = await getUserSession(user);
+        return json(res, 200, { chats: await listChats(s), active: s.chatId });
+      }
+
+      // محادثة جديدة (إن كانت الحالية فارغة نبقيها)
+      if (req.method === "POST" && url.pathname === "/api/chats/new") {
+        const user = await authenticate(req);
+        const s = await getUserSession(user);
+        if (s.busy) return json(res, 409, { error: "الوكيل مشغول، انتظر حتى ينتهي" });
+        if (s.messages.length) await createChat(s);
+        return json(res, 200, chatState(s));
+      }
+
+      // فتح محادثة سابقة
+      if (req.method === "POST" && url.pathname === "/api/chats/select") {
+        const user = await authenticate(req);
+        const s = await getUserSession(user);
+        if (s.busy) return json(res, 409, { error: "الوكيل مشغول، انتظر حتى ينتهي" });
+        const { id } = await readJson(req);
+        if (!(await loadChat(s, String(id)))) return json(res, 404, { error: "chat not found" });
+        return json(res, 200, chatState(s));
+      }
+
+      // حذف محادثة
+      if (req.method === "POST" && url.pathname === "/api/chats/delete") {
+        const user = await authenticate(req);
+        const s = await getUserSession(user);
+        if (s.busy) return json(res, 409, { error: "الوكيل مشغول، انتظر حتى ينتهي" });
+        const { id } = await readJson(req);
+        if (!validChatId(id)) return json(res, 400, { error: "bad id" });
+        await deleteChat(s, id);
+        if (id === s.chatId) {
+          const list = await listChats(s);
+          if (!(list.length && (await loadChat(s, list[0].id)))) await createChat(s);
+        }
+        return json(res, 200, chatState(s));
+      }
+
+      // تغيير حالة مرحلة يدوياً (تم / إعادة)
+      if (req.method === "POST" && url.pathname === "/api/roadmap/status") {
+        const user = await authenticate(req);
+        const s = await getUserSession(user);
+        const { id, status } = await readJson(req);
+        const m = s.roadmap && s.roadmap.milestones.find((x) => x.id === id);
+        if (!m) return json(res, 404, { error: "milestone not found" });
+        if (!STATUSES.includes(status)) return json(res, 400, { error: "bad status" });
+        m.status = status;
+        emit(s, { type: "roadmap", roadmap: s.roadmap });
+        await saveChatMeta(s);
+        return json(res, 200, { ok: true });
       }
 
       // تذكرة لقناة الأحداث (SSE)
@@ -622,13 +894,22 @@ http
         return json(res, 200, { providers: list, default: list[0]?.id || null });
       }
 
-      // رسالة من المستخدم
+      // رسالة من المستخدم (أو طلب تنفيذ مرحلة من الخريطة)
       if (req.method === "POST" && url.pathname === "/api/chat") {
         const user = await authenticate(req);
-        const { message, provider } = await readJson(req);
+        const { message, provider, milestoneId } = await readJson(req);
         const s = await getUserSession(user);
         if (s.busy) return json(res, 409, { error: "الوكيل مشغول، انتظر حتى ينتهي" });
-        if (!message || !String(message).trim()) return json(res, 400, { error: "empty" });
+
+        let text = String(message || "");
+        let milestone = null;
+        if (milestoneId) {
+          milestone = s.roadmap && s.roadmap.milestones.find((x) => x.id === milestoneId);
+          if (!milestone) return json(res, 404, { error: "المرحلة غير موجودة" });
+          text = `🎯 نفّذ مرحلة الخريطة: «${milestone.title}» (id: ${milestone.id})\n${milestone.description}`;
+        }
+        if (!text.trim()) return json(res, 400, { error: "empty" });
+
         const list = availableProviders();
         const chosen = list.find((p) => p.id === provider) ? provider : list[0]?.id;
         if (!chosen) return json(res, 400, { error: "no AI provider configured on the server" });
@@ -643,7 +924,11 @@ http
           throw e;
         }
         emit(s, { type: "usage", used: usage.used + 1, limit: usage.limit });
-        runAgent(s, String(message), chosen);
+        if (milestone) {
+          milestone.status = "in_progress";
+          emit(s, { type: "roadmap", roadmap: s.roadmap });
+        }
+        runAgent(s, text, chosen);
         return json(res, 200, { ok: true });
       }
 
