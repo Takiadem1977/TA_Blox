@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // الموقع لا يتصل بـ Firestore مباشرة، فقط السيرفر (Admin SDK) يتجاوز هذه القواعد.
+    // نمنع أي وصول من المتصفح.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
