@@ -7,81 +7,184 @@
 <style>
   :root {
     --bg:#16161a; --panel:#1f1f26; --line:#2d2d38; --text:#ececf1; --muted:#9a9aab;
-    --accent:#f5c518; --user:#2b3a67; --ok:#3ddc84; --bad:#ff5c5c;
+    --accent:#f5c518; --user:#2b3a67; --ok:#3ddc84; --bad:#ff5c5c; --blue:#2b6cff;
   }
   * { box-sizing:border-box; }
   html,body { height:100%; margin:0; }
-  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif; display:flex; flex-direction:column; }
-  header { display:flex; gap:16px; align-items:center; padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; margin-inline-end:auto; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif; display:flex; flex-direction:column; overflow:hidden; }
+  button { font-family:inherit; }
+
+  /* ---------- الهيدر ---------- */
+  header { display:flex; gap:10px; align-items:center; padding:10px 14px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; margin-inline-end:auto; white-space:nowrap; }
   header h1 span { color:var(--accent); }
-  .conn { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  .iconbtn { background:#111; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 11px; font-size:13px; cursor:pointer; font-weight:400; }
+  .iconbtn:hover { border-color:var(--accent); }
+  .iconbtn b { color:var(--accent); }
+  .conn { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); }
   .dot { width:10px; height:10px; border-radius:50%; background:var(--bad); }
   .dot.on { background:var(--ok); }
-  .code { font-family:ui-monospace,Consolas,monospace; font-size:18px; letter-spacing:3px; background:#111; border:1px dashed var(--accent); color:var(--accent); padding:4px 12px; border-radius:8px; cursor:pointer; direction:ltr; }
-  #help { background:var(--panel); border-bottom:1px solid var(--line); padding:10px 18px; font-size:13px; color:var(--muted); line-height:1.7; }
+  .code { font-family:ui-monospace,Consolas,monospace; font-size:15px; letter-spacing:2px; background:#111; border:1px dashed var(--accent); color:var(--accent); padding:3px 10px; border-radius:8px; cursor:pointer; direction:ltr; }
+  .user { font-size:12px; color:var(--muted); display:flex; gap:8px; align-items:center; direction:ltr; }
+  .usage { background:#111; border:1px solid var(--line); border-radius:8px; padding:3px 9px; font-size:12px; color:var(--muted); }
+  select { background:#111; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; font-size:12.5px; direction:ltr; max-width:200px; }
+  .link { background:none; color:var(--muted); font-weight:400; text-decoration:underline; padding:0; font-size:12.5px; border:0; cursor:pointer; }
+  #help { background:var(--panel); border-bottom:1px solid var(--line); padding:9px 16px; font-size:13px; color:var(--muted); line-height:1.7; }
   #help.hidden { display:none; }
+
+  /* ---------- التخطيط ---------- */
+  #app { flex:1; display:flex; min-height:0; }
+  .panel { background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  .panel.closed { display:none; }
+  #sidebar { width:250px; border-inline-end:1px solid var(--line); }
+  #roadmap { width:350px; border-inline-start:1px solid var(--line); }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-bottom:1px solid var(--line); font-size:14px; }
+  .x { background:none; border:0; color:var(--muted); font-size:16px; cursor:pointer; padding:0 4px; }
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+
+  /* ---------- المحادثات ---------- */
+  .newchat { margin:10px; background:var(--accent); color:#111; border:0; border-radius:10px; padding:10px; font-weight:700; cursor:pointer; font-size:14px; }
+  #chatList { flex:1; overflow-y:auto; padding:0 8px 10px; display:flex; flex-direction:column; gap:3px; }
+  .ci { display:flex; align-items:center; gap:6px; padding:9px 10px; border-radius:9px; cursor:pointer; font-size:13.5px; border:1px solid transparent; }
+  .ci:hover { background:#272731; }
+  .ci.active { background:#2a2a36; border-color:var(--accent); }
+  .ci .t { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ci .d { font-size:11px; color:var(--muted); }
+  .ci .del { opacity:0; background:none; border:0; color:var(--muted); cursor:pointer; font-size:13px; }
+  .ci:hover .del { opacity:1; }
+  .ci .del:hover { color:var(--bad); }
+  .empty { color:var(--muted); font-size:13px; text-align:center; padding:20px 10px; line-height:1.8; }
+
+  /* ---------- الشات ---------- */
   #chat { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:10px; max-width:900px; width:100%; margin:0 auto; }
   .msg { padding:10px 14px; border-radius:12px; line-height:1.65; white-space:pre-wrap; word-break:break-word; max-width:88%; }
   .msg.user { background:var(--user); align-self:flex-start; }
   .msg.ai { background:var(--panel); border:1px solid var(--line); align-self:flex-end; }
   .msg.err { background:#3a1f1f; border:1px solid var(--bad); align-self:center; }
-  .tool { align-self:flex-end; font-size:12.5px; color:var(--muted); background:#101014; border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-family:ui-monospace,Consolas,monospace; direction:ltr; max-width:88%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tool { align-self:flex-end; font-size:12.5px; color:var(--muted); background:#101014; border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-family:ui-monospace,Consolas,monospace; max-width:88%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tool.ok::before { content:"✓ "; color:var(--ok); }
   .tool.fail::before { content:"✗ "; color:var(--bad); }
   .tool.run::before { content:"⟳ "; color:var(--accent); }
   pre { background:#0c0c10; border:1px solid var(--line); border-radius:8px; padding:10px; overflow-x:auto; direction:ltr; text-align:left; margin:8px 0; }
   code { font-family:ui-monospace,Consolas,monospace; font-size:13px; }
-  p.inl code { background:#0c0c10; padding:1px 5px; border-radius:4px; }
-  form { display:flex; gap:10px; padding:14px 18px; background:var(--panel); border-top:1px solid var(--line); max-width:none; }
+  .inl code { background:#0c0c10; padding:1px 5px; border-radius:4px; }
+  form { display:flex; padding:12px 16px; background:var(--panel); border-top:1px solid var(--line); }
   form .wrap { display:flex; gap:10px; width:100%; max-width:900px; margin:0 auto; }
   textarea { flex:1; resize:none; height:54px; background:#111; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; }
   textarea:focus { outline:1px solid var(--accent); }
-  button { background:var(--accent); color:#111; border:0; border-radius:10px; padding:0 22px; font-weight:700; cursor:pointer; font-size:15px; }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  select { background:#111; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; font-size:13px; direction:ltr; }
-  .user { font-size:12.5px; color:var(--muted); display:flex; gap:8px; align-items:center; direction:ltr; }
-  .usage { background:#111; border:1px solid var(--line); border-radius:8px; padding:3px 9px; font-size:12px; color:var(--muted); }
-  #login { position:fixed; inset:0; background:var(--bg); display:none; align-items:center; justify-content:center; flex-direction:column; gap:18px; z-index:10; text-align:center; padding:20px; }
+  #send { background:var(--accent); color:#111; border:0; border-radius:10px; padding:0 22px; font-weight:700; cursor:pointer; font-size:15px; }
+  #send:disabled, .primary:disabled { opacity:.45; cursor:not-allowed; }
+
+  /* ---------- خريطة الإنجازات ---------- */
+  .rm-body { flex:1; overflow-y:auto; padding:12px 14px 16px; }
+  .rm-goal { font-size:13px; color:var(--muted); line-height:1.7; margin-bottom:10px; }
+  .progress { height:9px; background:#111; border-radius:6px; overflow:hidden; border:1px solid var(--line); }
+  #rmBar { height:100%; width:0; background:linear-gradient(90deg,#f5c518,#ffdf6b); transition:width .5s; }
+  .rm-count { font-size:12px; color:var(--muted); margin:5px 0 8px; display:flex; justify-content:space-between; }
+  #rmMap svg { display:block; margin:0 auto; max-width:320px; }
+  .road { fill:none; stroke:#3b3b49; stroke-width:6; stroke-dasharray:2 11; stroke-linecap:round; }
+  .road.done { stroke:var(--accent); stroke-dasharray:none; opacity:.9; }
+  .node { cursor:pointer; }
+  .node circle { fill:#262630; stroke:#5a5a6c; stroke-width:3; transition:all .25s; }
+  .node:hover circle { stroke:#fff; }
+  .node .num { fill:#fff; font-size:17px; font-weight:700; text-anchor:middle; pointer-events:none; }
+  .node .lbl { fill:#d4d4de; font-size:12.5px; text-anchor:middle; pointer-events:none; }
+  .node.done circle { fill:var(--accent); stroke:#fff3b0; }
+  .node.done .num { fill:#111; font-size:22px; }
+  .node.in_progress circle { fill:var(--blue); stroke:#9cc0ff; animation:pulse 1.4s infinite; }
+  .node.next circle { stroke:#fff; stroke-width:4; }
+  .node.sel circle { stroke:#fff; stroke-width:5; }
+  @keyframes pulse { 50% { stroke-opacity:.25; } }
+  .rm-card { background:#16161c; border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:12px; }
+  .rm-title { font-weight:700; font-size:14.5px; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:20px; white-space:nowrap; font-weight:600; }
+  .badge.todo { background:#2d2d38; color:var(--muted); }
+  .badge.in_progress { background:var(--blue); color:#fff; }
+  .badge.done { background:var(--accent); color:#111; }
+  .rm-card p { margin:0 0 10px; font-size:13px; line-height:1.7; color:#cfcfda; }
+  .rm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .primary { background:var(--accent); color:#111; border:0; border-radius:9px; padding:8px 14px; font-weight:700; cursor:pointer; font-size:13px; }
+  .ghost { background:#111; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 12px; cursor:pointer; font-size:13px; }
+  .ghost:hover { border-color:var(--accent); }
+  .more { width:100%; margin-top:12px; }
+  #toast { position:fixed; bottom:84px; left:50%; transform:translate(-50%,30px); background:var(--accent); color:#111; font-weight:700; padding:10px 20px; border-radius:30px; opacity:0; pointer-events:none; transition:all .35s; z-index:50; box-shadow:0 6px 24px #0008; }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+
+  /* ---------- تسجيل الدخول ---------- */
+  #login { position:fixed; inset:0; background:var(--bg); display:none; align-items:center; justify-content:center; flex-direction:column; gap:18px; z-index:100; text-align:center; padding:20px; }
   #login h2 { margin:0; font-size:26px; }
   #login h2 span { color:var(--accent); }
   #login p { color:var(--muted); margin:0; max-width:420px; line-height:1.7; }
-  #login button { padding:12px 26px; }
-  .link { background:none; color:var(--muted); font-weight:400; text-decoration:underline; padding:0; font-size:13px; }
+  #login button { padding:12px 26px; background:var(--accent); color:#111; border:0; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer; }
+
+  /* ---------- الجوال: اللوحات تصير طبقات ---------- */
+  @media (max-width: 900px) {
+    .panel { position:fixed; top:0; bottom:0; z-index:40; box-shadow:0 0 30px #000a; }
+    #sidebar { right:0; width:80vw; max-width:300px; }
+    #roadmap { left:0; width:92vw; max-width:380px; }
+    header h1 { font-size:14px; }
+  }
 </style>
 </head>
 <body>
 <header>
+  <button class="iconbtn" id="toggleSide" title="المحادثات">☰ المحادثات</button>
   <h1>🍋 Roblox <span>AI Agent</span></h1>
   <select id="provider" title="نموذج الذكاء الاصطناعي"></select>
   <div class="conn"><span class="dot" id="dot"></span><span id="statusText">Studio غير متصل</span></div>
   <div class="code" id="code" title="اضغط للنسخ">..........</div>
   <span class="usage" id="usage" style="display:none"></span>
+  <button class="iconbtn" id="toggleMap" title="خريطة الإنجازات">🗺️ الخريطة <b id="mapBadge"></b></button>
   <div class="user" id="userBox" style="display:none"><span id="email"></span><button class="link" id="logout">خروج</button></div>
   <button class="link" id="toggleHelp">كيف أربط Studio؟</button>
 </header>
 
 <div id="login">
   <h2>🍋 Roblox <span>AI Agent</span></h2>
-  <p>سجّل الدخول لتربط Roblox Studio وتبني ألعابك بالذكاء الاصطناعي. محادثاتك تُحفظ على حسابك.</p>
+  <p>سجّل الدخول لتربط Roblox Studio وتبني ألعابك بالذكاء الاصطناعي. محادثاتك وخرائط إنجازاتك تُحفظ على حسابك.</p>
   <button id="loginBtn">تسجيل الدخول بحساب Google</button>
   <p id="loginErr" style="color:var(--bad)"></p>
 </div>
 
-<div id="help">
+<div id="help" class="hidden">
   1) ثبّت البلجن في Roblox Studio وافتحه من تبويب Plugins.<br>
   2) الصق الكود الظاهر أعلاه في خانة <b>Code</b> داخل البلجن واضغط <b>Connect</b>.<br>
-  3) لما تصير النقطة خضراء، اكتب طلبك هنا وسيتم التنفيذ مباشرة في الماب (والتراجع متاح بـ Ctrl+Z).
+  3) لما تصير النقطة خضراء، صِف لعبتك أو عالمك وتفتح لك <b>خريطة الإنجازات</b>، ثم نفّذ المراحل واحدة واحدة (والتراجع متاح بـ Ctrl+Z).
 </div>
 
-<div id="chat"></div>
+<div id="app">
+  <aside id="sidebar" class="panel">
+    <button class="newchat" id="newChat">＋ محادثة جديدة</button>
+    <div id="chatList"></div>
+  </aside>
 
-<form id="form">
-  <div class="wrap">
-    <textarea id="input" placeholder="مثال: ابنِ لي ساحة مبارزة بحجم 100×100 مع نظام نقاط للاعبين…"></textarea>
-    <button id="send" type="submit">إرسال</button>
-  </div>
-</form>
+  <main>
+    <div id="chat"></div>
+    <form id="form">
+      <div class="wrap">
+        <textarea id="input" placeholder="صِف لعبتك أو عالمك… مثال: لعبة بقاء في جزيرة فيها بناء وحرفة"></textarea>
+        <button id="send" type="submit">إرسال</button>
+      </div>
+    </form>
+  </main>
+
+  <aside id="roadmap" class="panel closed">
+    <div class="panel-head"><b>🗺️ خريطة الإنجازات</b><button class="x" id="closeMap">✕</button></div>
+    <div class="rm-body">
+      <div id="rmEmpty" class="empty">لا توجد خريطة بعد.<br>اكتب في المحادثة وصف لعبتك أو عالمك، وسأبني لك خريطة مراحل تنفّذها واحدة واحدة.</div>
+      <div id="rmContent" style="display:none">
+        <div class="rm-goal" id="rmGoal"></div>
+        <div class="progress"><div id="rmBar"></div></div>
+        <div class="rm-count"><span id="rmCount"></span><span id="rmPct"></span></div>
+        <div id="rmMap"></div>
+        <div id="rmDetail"></div>
+        <button class="ghost more" id="rmMore">＋ اقترح مراحل جديدة</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -89,16 +192,16 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 
 const $ = (id) => document.getElementById(id);
 const chat = $("chat"), input = $("input"), sendBtn = $("send");
-let code = null;
-let busy = false;
-let lastToolEl = null;
-let auth = null;      // null = وضع التطوير بدون تسجيل دخول
-let es = null;
-let started = false;
+const isMobile = () => matchMedia("(max-width: 900px)").matches;
 
-function esc(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+let code = null, busy = false, lastToolEl = null, auth = null, es = null, started = false;
+let studioOn = false;
+let activeChat = null;
+let roadmap = null, selected = null;
 
-// تنسيق بسيط: ```code``` و `inline`
+/* ───────────────────────── أدوات عامة ───────────────────────── */
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
 function render(text) {
   const parts = text.split(/```(?:\w+)?\n?([\s\S]*?)```/g);
   let html = "";
@@ -111,18 +214,25 @@ function render(text) {
 
 function add(cls, html) {
   const d = document.createElement("div");
-  d.className = cls;
-  d.dir = "auto";
-  d.innerHTML = html;
+  d.className = cls; d.dir = "auto"; d.innerHTML = html;
   chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
   return d;
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove("show"), 3800);
 }
 
 function setBusy(b) {
   busy = b;
   sendBtn.disabled = b;
   sendBtn.textContent = b ? "…" : "إرسال";
+  renderDetail();
 }
 
 function setUsage(u) {
@@ -132,20 +242,41 @@ function setUsage(u) {
   el.textContent = `${u.used}/${u.limit} اليوم`;
 }
 
-function toolLabel(name, input) {
-  const target = input.path || input.name || input.className || "";
-  return name + (target ? "  " + target : "");
-}
-
 async function headers() {
   const h = { "content-type": "application/json" };
   if (auth && auth.currentUser) h.authorization = "Bearer " + (await auth.currentUser.getIdToken());
   return h;
 }
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, { method, headers: await headers(), body: body ? JSON.stringify(body) : undefined });
+  let data = null; try { data = await r.json(); } catch {}
+  if (!r.ok) throw new Error((data && data.error) || r.status);
+  return data;
+}
+
+function togglePanel(id, force) {
+  const el = $(id);
+  const open = force === undefined ? el.classList.contains("closed") : force;
+  el.classList.toggle("closed", !open);
+  if (open && isMobile()) { // على الجوال نفتح لوحة واحدة فقط
+    const other = id === "sidebar" ? "roadmap" : "sidebar";
+    $(other).classList.add("closed");
+  }
+}
+
+/* ───────────────────────── الشات ───────────────────────── */
+const TOOL_NAMES = { set_roadmap: "🗺️ إنشاء خريطة الإنجازات", add_milestones: "🗺️ إضافة مراحل جديدة", update_milestone: "🏅 تحديث مرحلة" };
+function toolLabel(name, input) {
+  input = input || {};
+  if (TOOL_NAMES[name]) return TOOL_NAMES[name] + (input.status ? "  " + input.status : "");
+  const target = input.path || input.name || input.className || "";
+  return name + (target ? "  " + target : "");
+}
 
 function handle(ev) {
   switch (ev.type) {
     case "status":
+      studioOn = ev.connected;
       $("dot").classList.toggle("on", ev.connected);
       $("statusText").textContent = ev.connected ? "Studio متصل" : "Studio غير متصل";
       break;
@@ -157,28 +288,202 @@ function handle(ev) {
         if (!ev.ok && ev.error) lastToolEl.textContent += "  — " + ev.error;
       }
       break;
+    case "roadmap": setRoadmap(ev.roadmap, { openIfNew: true }); break;
     case "usage": setUsage({ used: ev.used, limit: ev.limit }); break;
     case "error": add("msg err", esc(ev.text)); break;
-    case "done": setBusy(false); input.focus(); break;
+    case "done": setBusy(false); refreshChats(); input.focus(); break;
   }
 }
 
-// إعادة رسم المحادثة المحفوظة
 function renderHistory(messages) {
   const tools = {};
   for (const m of messages) {
     if (typeof m.content === "string") {
-      if (m.role === "user") add("msg user", esc(m.content));
+      if (m.role === "user") add("msg user", esc(m.content.startsWith("🎯") ? m.content.split("\n")[0].replace(/\s*\(id:[^)]*\)/, "") : m.content));
       continue;
     }
     for (const b of m.content) {
       if (b.type === "text" && m.role === "assistant" && b.text.trim()) add("msg ai", render(b.text));
-      else if (b.type === "tool_use") tools[b.id] = add("tool ok", esc(toolLabel(b.name, b.input || {})));
+      else if (b.type === "tool_use") tools[b.id] = add("tool ok", esc(toolLabel(b.name, b.input)));
       else if (b.type === "tool_result" && tools[b.tool_use_id]) tools[b.tool_use_id].className = "tool " + (b.is_error ? "fail" : "ok");
     }
   }
 }
 
+async function sendMessage(text, milestone) {
+  if (busy || !code) return;
+  add("msg user", esc(milestone ? `🎯 نفّذ مرحلة الخريطة: «${milestone.title}»` : text));
+  setBusy(true);
+  try {
+    await api("/api/chat", "POST", milestone ? { milestoneId: milestone.id, provider: $("provider").value } : { message: text, provider: $("provider").value });
+  } catch (e) {
+    add("msg err", esc("فشل الإرسال: " + e.message));
+    setBusy(false);
+    refreshRoadmapFromServer();
+  }
+}
+
+/* ───────────────────────── المحادثات السابقة ───────────────────────── */
+function fmtDate(ts) {
+  const d = new Date(ts), now = new Date();
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("ar", { day: "numeric", month: "short" });
+}
+
+async function refreshChats() {
+  try {
+    const d = await api("/api/chats");
+    activeChat = d.active;
+    const list = $("chatList");
+    if (!d.chats.length) { list.innerHTML = '<div class="empty">لا توجد محادثات</div>'; return; }
+    list.innerHTML = d.chats.map((c) =>
+      `<div class="ci ${c.id === activeChat ? "active" : ""}" data-id="${c.id}">
+         <span class="t" dir="auto">${esc(c.title)}</span><span class="d">${fmtDate(c.updatedAt)}</span>
+         <button class="del" data-del="${c.id}" title="حذف">✕</button></div>`).join("");
+  } catch {}
+}
+
+// عرض حالة محادثة (سجل + خريطة)
+function openState(st) {
+  activeChat = st.chatId;
+  chat.innerHTML = "";
+  lastToolEl = null;
+  setRoadmap(st.roadmap, { silent: true, openIfNew: true });
+  if (st.messages.length) renderHistory(st.messages);
+  else add("msg ai", "أهلاً! اربط Studio بالكود الظاهر فوق، ثم صِف لي لعبتك أو عالمك بجملة أو جملتين، وسأفتح لك 🗺️ خريطة إنجازات تنفّذها خطوة خطوة.");
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function newChat() {
+  if (busy) return toast("انتظر حتى ينتهي الرد الحالي");
+  try { openState(await api("/api/chats/new", "POST")); refreshChats(); if (isMobile()) togglePanel("sidebar", false); }
+  catch (e) { toast(e.message); }
+}
+async function selectChat(id) {
+  if (busy) return toast("انتظر حتى ينتهي الرد الحالي");
+  if (id === activeChat) return isMobile() && togglePanel("sidebar", false);
+  try { openState(await api("/api/chats/select", "POST", { id })); refreshChats(); if (isMobile()) togglePanel("sidebar", false); }
+  catch (e) { toast(e.message); }
+}
+async function deleteChat(id) {
+  if (busy) return toast("انتظر حتى ينتهي الرد الحالي");
+  if (!confirm("حذف هذه المحادثة نهائياً مع خريطتها؟")) return;
+  try { openState(await api("/api/chats/delete", "POST", { id })); refreshChats(); }
+  catch (e) { toast(e.message); }
+}
+
+/* ───────────────────────── خريطة الإنجازات ───────────────────────── */
+function setRoadmap(r, opts = {}) {
+  const prev = roadmap;
+  const wasNone = !prev;
+  // إشعار إنجاز لكل مرحلة صارت done
+  if (!opts.silent && prev && r) {
+    for (const m of r.milestones) {
+      const old = prev.milestones.find((x) => x.id === m.id);
+      if (m.status === "done" && (!old || old.status !== "done")) toast("🏆 إنجاز جديد: " + m.title);
+    }
+  }
+  roadmap = r;
+  if (r && !r.milestones.find((m) => m.id === selected)) {
+    const next = r.milestones.find((m) => m.status !== "done");
+    selected = (next || r.milestones[r.milestones.length - 1]).id;
+  }
+  if (!r) selected = null;
+  drawRoadmap();
+  if (r && wasNone && opts.openIfNew && (!isMobile() || !opts.silent)) togglePanel("roadmap", true);
+}
+
+async function refreshRoadmapFromServer() {
+  try { const st = await api("/api/history"); setRoadmap(st.roadmap, { silent: true }); } catch {}
+}
+
+function wrapTitle(t) {
+  const words = t.split(/\s+/), lines = [""];
+  for (const w of words) {
+    const cur = lines[lines.length - 1];
+    if ((cur + " " + w).trim().length <= 17) lines[lines.length - 1] = (cur + " " + w).trim();
+    else lines.push(w);
+  }
+  return lines.slice(0, 2).map((l, i, a) => (i === 1 && lines.length > 2 ? l + "…" : l));
+}
+
+function drawRoadmap() {
+  const has = !!roadmap;
+  $("rmEmpty").style.display = has ? "none" : "";
+  $("rmContent").style.display = has ? "" : "none";
+  if (!has) { $("mapBadge").textContent = ""; return; }
+
+  const ms = roadmap.milestones;
+  const done = ms.filter((m) => m.status === "done").length;
+  $("rmGoal").textContent = roadmap.goal || "";
+  $("rmBar").style.width = Math.round((done / ms.length) * 100) + "%";
+  $("rmCount").textContent = `${done} من ${ms.length} مراحل`;
+  $("rmPct").textContent = Math.round((done / ms.length) * 100) + "%";
+  $("mapBadge").textContent = `${done}/${ms.length}`;
+
+  const W = 320, STEP = 118, TOP = 48, H = TOP + (ms.length - 1) * STEP + 92;
+  const X = (i) => (i % 2 === 0 ? 220 : 100); // تعرّج: يمين/يسار
+  const Y = (i) => TOP + i * STEP;
+  const firstOpen = ms.findIndex((m) => m.status !== "done");
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  for (let i = 0; i < ms.length - 1; i++) {
+    const x0 = X(i), y0 = Y(i), x1 = X(i + 1), y1 = Y(i + 1);
+    svg += `<path class="road ${ms[i].status === "done" ? "done" : ""}" d="M${x0} ${y0} C${x0} ${y0 + 62} ${x1} ${y1 - 62} ${x1} ${y1}"/>`;
+  }
+  ms.forEach((m, i) => {
+    const cls = [m.status, i === firstOpen && m.status !== "in_progress" ? "next" : "", m.id === selected ? "sel" : ""].join(" ");
+    const lines = wrapTitle(m.title).map((l, k) => `<text class="lbl" y="${46 + k * 15}">${esc(l)}</text>`).join("");
+    svg += `<g class="node ${cls}" data-id="${esc(m.id)}" transform="translate(${X(i)},${Y(i)})"><circle r="27"/><text class="num" y="6">${m.status === "done" ? "★" : i + 1}</text>${lines}</g>`;
+  });
+  svg += "</svg>";
+  $("rmMap").innerHTML = svg;
+  renderDetail();
+}
+
+const STATUS_AR = { todo: "لم تبدأ", in_progress: "قيد التنفيذ", done: "منجزة ✓" };
+function renderDetail() {
+  const box = $("rmDetail");
+  if (!roadmap) { box.innerHTML = ""; return; }
+  const i = roadmap.milestones.findIndex((m) => m.id === selected);
+  if (i < 0) { box.innerHTML = ""; return; }
+  const m = roadmap.milestones[i];
+  box.innerHTML = `
+    <div class="rm-card">
+      <div class="rm-title"><span dir="auto">${i + 1}. ${esc(m.title)}</span><span class="badge ${m.status}">${STATUS_AR[m.status]}</span></div>
+      <p dir="auto">${esc(m.description)}</p>
+      <div class="rm-actions">
+        <button class="primary" id="rmRun" ${busy ? "disabled" : ""}>${m.status === "done" ? "🔁 أعد التنفيذ" : "🚀 نفّذها بالذكاء الاصطناعي"}</button>
+        <button class="ghost" id="rmToggle">${m.status === "done" ? "↺ إعادة فتحها" : "✓ علّمها منجزة"}</button>
+      </div>
+    </div>`;
+}
+
+$("rmMap").addEventListener("click", (e) => {
+  const g = e.target.closest(".node");
+  if (!g) return;
+  selected = g.dataset.id;
+  drawRoadmap();
+});
+$("rmDetail").addEventListener("click", async (e) => {
+  const m = roadmap && roadmap.milestones.find((x) => x.id === selected);
+  if (!m) return;
+  if (e.target.id === "rmRun") {
+    if (!studioOn) return toast("اربط Roblox Studio أولاً بالكود الظاهر في الأعلى");
+    if (isMobile()) togglePanel("roadmap", false);
+    sendMessage("", m);
+  } else if (e.target.id === "rmToggle") {
+    try { await api("/api/roadmap/status", "POST", { id: m.id, status: m.status === "done" ? "todo" : "done" }); }
+    catch (err) { toast(err.message); }
+  }
+});
+$("rmMore").onclick = () => {
+  if (busy) return toast("انتظر حتى ينتهي الرد الحالي");
+  if (isMobile()) togglePanel("roadmap", false);
+  sendMessage("أضف مراحل جديدة لخريطة الإنجازات تكمّل ما بنيناه وتطوّر الماب أكثر.");
+};
+
+/* ───────────────────────── التهيئة ───────────────────────── */
 async function loadProviders() {
   const sel = $("provider");
   const d = await (await fetch("/api/providers")).json();
@@ -196,10 +501,10 @@ async function loadProviders() {
 async function connectEvents() {
   if (es) es.close();
   try {
-    const t = await (await fetch("/api/events-ticket", { headers: await headers() })).json();
+    const t = await api("/api/events-ticket");
     es = new EventSource("/api/events?ticket=" + t.ticket);
     es.onmessage = (e) => handle(JSON.parse(e.data));
-    es.onerror = () => { es.close(); setTimeout(connectEvents, 3000); }; // نجدد التذكرة ونعيد الاتصال
+    es.onerror = () => { es.close(); setTimeout(connectEvents, 3000); };
   } catch { setTimeout(connectEvents, 5000); }
 }
 
@@ -208,23 +513,22 @@ async function startApp() {
   started = true;
   $("login").style.display = "none";
   await loadProviders();
-  const r = await fetch("/api/session", { method: "POST", headers: await headers() });
-  if (!r.ok) { add("msg err", "فشل تحميل الجلسة: " + (await r.text())); started = false; return; }
-  const s = await r.json();
+  let s;
+  try { s = await api("/api/session", "POST"); }
+  catch (e) { add("msg err", "فشل تحميل الجلسة: " + esc(e.message)); started = false; return; }
   code = s.code;
   $("code").textContent = code;
   setUsage(s.usage);
   if (auth) { $("userBox").style.display = ""; $("email").textContent = s.email || ""; }
-
-  const h = await (await fetch("/api/history", { headers: await headers() })).json();
-  if (h.messages.length) renderHistory(h.messages);
-  else add("msg ai", "أهلاً! اربط Studio بالكود الظاهر فوق، وبعدين قلّي شو بدك نبني. 🛠️");
+  if (!isMobile()) togglePanel("sidebar", true);
+  openState(await api("/api/history"));
+  refreshChats();
   connectEvents();
 }
 
 async function init() {
   const cfg = await (await fetch("/api/config")).json();
-  if (!cfg.authRequired) return startApp(); // وضع التطوير
+  if (!cfg.authRequired) return startApp();
   if (!cfg.firebase) {
     $("login").style.display = "flex";
     $("loginBtn").style.display = "none";
@@ -246,21 +550,23 @@ async function init() {
 
 $("code").onclick = () => { if (!code) return; navigator.clipboard.writeText(code); $("code").textContent = "تم النسخ ✓"; setTimeout(() => ($("code").textContent = code), 1200); };
 $("toggleHelp").onclick = () => $("help").classList.toggle("hidden");
+$("toggleSide").onclick = () => togglePanel("sidebar");
+$("toggleMap").onclick = () => togglePanel("roadmap");
+$("closeMap").onclick = () => togglePanel("roadmap", false);
+$("newChat").onclick = newChat;
+$("chatList").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del]");
+  if (del) { e.stopPropagation(); return deleteChat(del.dataset.del); }
+  const item = e.target.closest(".ci");
+  if (item) selectChat(item.dataset.id);
+});
 
-$("form").onsubmit = async (e) => {
+$("form").onsubmit = (e) => {
   e.preventDefault();
   const text = input.value.trim();
   if (!text || busy || !code) return;
   input.value = "";
-  add("msg user", esc(text));
-  setBusy(true);
-  const r = await fetch("/api/chat", { method: "POST", headers: await headers(), body: JSON.stringify({ message: text, provider: $("provider").value }) });
-  if (!r.ok) {
-    let msg = await r.text();
-    try { msg = JSON.parse(msg).error || msg; } catch {}
-    add("msg err", esc("فشل الإرسال: " + msg));
-    setBusy(false);
-  }
+  sendMessage(text);
 };
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); } });
 
