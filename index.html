@@ -489,7 +489,7 @@ async function loadProviders() {
   const d = await (await fetch("/api/providers")).json();
   if (!d.providers.length) {
     sel.innerHTML = "<option>لا يوجد مزوّد</option>";
-    add("msg err", "السيرفر ما فيه أي مفتاح API. أضف ANTHROPIC_API_KEY أو GEMINI_API_KEY أو GROQ_API_KEY أو DEEPSEEK_API_KEY في Environment.");
+    add("msg err", "السيرفر ما فيه أي مفتاح API. أضف ANTHROPIC_API_KEY أو GEMINI_API_KEY أو GROQ_API_KEY أو DEEPSEEK_API_KEY أو OPENROUTER_API_KEY في Environment.");
     return;
   }
   sel.innerHTML = d.providers.map((p) => `<option value="${p.id}">${p.label} · ${p.model}</option>`).join("");
